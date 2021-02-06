@@ -12,6 +12,7 @@ A collection of Matlab-Raspi I2C drivers for components in the Sparkfun Qwiic I2
 - [Qwiic Servo pHAT](<https://www.sparkfun.com/products/15316>)
 
 ## TODO
+- Correctly map servo signal timing ranges to 0-180 or 0-90 degree ranges
 - Support [Qwiic 12 bit ADC](<https://www.sparkfun.com/products/15334>) (In development, eta 2/7) 
 
 ## References
