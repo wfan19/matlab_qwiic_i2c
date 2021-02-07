@@ -2,6 +2,8 @@ classdef QwiicServoPHat < matlab_qwiic_i2c.QwiicI2CBase
     % QwiicServoPHat: A class for interfacing with the Qwiic Servo PHat
     % i2c servo conrtoller board
     % See datasheet here: https://cdn-shop.adafruit.com/datasheets/PCA9685.pdf
+    % 
+    % TODO: Documentation on basic functions?
     
     properties
         %% Properties
@@ -9,6 +11,7 @@ classdef QwiicServoPHat < matlab_qwiic_i2c.QwiicI2CBase
         % i2c_dev: matlab i2c follower object
         
         frequency
+        min_max_times
     end
 
     methods
@@ -17,6 +20,8 @@ classdef QwiicServoPHat < matlab_qwiic_i2c.QwiicI2CBase
             device = i2cdev(rpi, rpi.AvailableI2CBuses{1}, '0x40');
             obj = obj@matlab_qwiic_i2c.QwiicI2CBase(device);
             obj.frequency = 50;
+            
+            obj.min_max_times = repelem([1, 2], 16, 1);
 
             % Initialize i2c device
             obj = obj.setFrequency(obj.frequency);
@@ -36,11 +41,6 @@ classdef QwiicServoPHat < matlab_qwiic_i2c.QwiicI2CBase
             self.setFrequency(50);
         end
         
-        %% Shutdown all servos
-        function shutdown(self)
-            self.writeWord(0xfc, 0);
-        end
-        
         %% Get status
         function bin_status = getStatus(self)
             bin_status = dec2bin(readRegister(self.i2c_dev, 0));
@@ -55,44 +55,6 @@ classdef QwiicServoPHat < matlab_qwiic_i2c.QwiicI2CBase
             if bitget(data, 4+1) == 1 || bitget(data,5+1) == 1
                 writeRegister(self.i2c_dev, 0, bin2dec('00100000'))
             end
-        end
-
-        %% Move a servo to targeted position
-        function setServoPosition(self, channel, position)
-            % Double-check settings
-            self.configure()
-            
-            % Calculate the targeted buffer IDs
-            % buffer_id_start: The register for configuring the time of the
-            % rising edge of the pwm signal
-            reg_id_start = 0x06 + 4*channel;
-
-            % buffer_id_end: The register for configuring the time of the
-            % falling edge of the pwm signal
-            reg_id_end = 0x08 + 4*channel;
-
-            % Write new pwm signal times to target buffers
-            self.writeWord(reg_id_start, 0)
-
-            % TODO: Wrap the position so it takes servo angles?
-            % Need to figure out the weird behavior related to the ranges
-            self.writeWord(reg_id_end, position);
-        end
-
-        %% Retrieve a servo's last target position
-        function position = getServoPosition(self, channel)
-            % Calculate the targeted buffer IDs
-            % buffer_id_start: The register for configuring the time of the
-            % rising edge of the pwm signal
-            reg_id_start = 0x06 + 4*channel;
-
-            % buffer_id_end: The register for configuring the time of the
-            % falling edge of the pwm signal
-            reg_id_end = 0x08 + 4*channel;
-            start_val = self.readWord(reg_id_start);
-            end_val = self.readWord(reg_id_end);
-            
-            position = end_val - start_val;
         end
 
         %% Set the PWM frequency of the IC
@@ -126,5 +88,85 @@ classdef QwiicServoPHat < matlab_qwiic_i2c.QwiicI2CBase
             % Return the object
             self.frequency = frequency;
         end
+        
+        %% Set servo timing range
+        % Default timing range: 1ms - 2ms
+        % However
+        function self = setServoRange(self, channel, range)
+            self.min_max_times(channel+1, :) = range;
+        end
+        
+        %% Get servo timing range
+        function range = getServoRange(self, channel)
+            range = self.min_max_times(channel+1, :);
+        end
+        
+        %% Move a servo to targeted position
+        function setServoPosition(self, channel, position)
+            % Double-check settings
+            self.configure()
+            
+            % Calculate the targeted buffer IDs
+            % buffer_id_start: The register for configuring the time of the
+            % rising edge of the pwm signal
+            reg_id_start = 0x06 + 4*channel;
+
+            % buffer_id_end: The register for configuring the time of the
+            % falling edge of the pwm signal
+            reg_id_end = 0x08 + 4*channel;
+            
+            % Calculate desired servo position:
+            % Implementation of the math found in the Sparkfun Qwiic
+            % pi_servo_hat.py file
+            % The only difference is here our Position is not in angle but
+            % as percent in 0 to 1
+            
+            % Calculate single register value duration:
+            % reg_val_duration is the amount of time (secs) that each 
+            % increment in register value represents.
+            % resolution = period / 4096 (4096 = range of possible pwm values)
+            reg_val_duration = 1/self.frequency/4096;
+            
+            % Min position wave high time (defines min position)
+            min_ms = self.min_max_times(channel+1, 1);
+            
+            % Max position wave high time (defines max position)
+            max_ms = self.min_max_times(channel+1, 2);
+            
+            % Calculate desired time in ms:
+            % By default, time range is 1ms - 2ms, with midpoint at 1.5ms.
+            % We make this configurable from min_ms - max_ms.
+            position_time = (position * (max_ms - min_ms) + min_ms); % ms
+            position_time = position_time/1000; % Convert to seconds
+            
+            % Calculate final desired register value
+            % This is the amount of single register value durations that
+            % put together the total position_time that we desire
+            reg_val_count = round(position_time/ reg_val_duration);
+
+            % Write new pwm signal times to target buffers
+            self.writeWord(reg_id_start, 0)
+            self.writeWord(reg_id_end, reg_val_count);
+        end
+
+        %% Retrieve a servo's last target position
+        function position = getServoPosition(self, channel)
+            % Calculate the targeted buffer IDs
+            % buffer_id_start: The register for configuring the time of the
+            % rising edge of the pwm signal
+            reg_id_start = 0x06 + 4*channel;
+
+            % buffer_id_end: The register for configuring the time of the
+            % falling edge of the pwm signal
+            reg_id_end = 0x08 + 4*channel;
+            
+            % TODO: Convert this to percentage
+            
+            start_val = self.readWord(reg_id_start);
+            end_val = self.readWord(reg_id_end);
+            
+            position = end_val - start_val;
+        end
+
     end
 end
