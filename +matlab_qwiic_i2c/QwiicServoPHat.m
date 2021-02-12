@@ -121,8 +121,8 @@ classdef QwiicServoPHat < matlab_qwiic_i2c.QwiicI2CBase
             % The only difference is here our Position is not in angle but
             % as percent in 0 to 1
             
-            % Calculate single register value duration:
-            % reg_val_duration is the amount of time (secs) that each 
+            % Calculate single register value pulse duration:
+            % reg_val_duration is the amount of pulse time (secs) that each 
             % increment in register value represents.
             % resolution = period / 4096 (4096 = range of possible pwm values)
             reg_val_duration = 1/self.frequency/4096;
@@ -136,12 +136,18 @@ classdef QwiicServoPHat < matlab_qwiic_i2c.QwiicI2CBase
             % Calculate desired time in ms:
             % By default, time range is 1ms - 2ms, with midpoint at 1.5ms.
             % We make this configurable from min_ms - max_ms.
+            % The position is a percentage of the total range of
+            % milliseconds, so the position time is just those multiplied
+            % together, converted to seconds.
             position_time = (position * (max_ms - min_ms) + min_ms); % ms
             position_time = position_time/1000; % Convert to seconds
             
-            % Calculate final desired register value
+            % Calculate final desired register value:
             % This is the amount of single register value durations that
-            % put together the total position_time that we desire
+            % put together the total position_time that we desire.
+            % Since we have derived the desired position time in
+            % seconds, we can divide to calculate the number of registers
+            % needed.
             reg_val_count = round(position_time/ reg_val_duration);
 
             % Write new pwm signal times to target buffers
@@ -160,12 +166,29 @@ classdef QwiicServoPHat < matlab_qwiic_i2c.QwiicI2CBase
             % falling edge of the pwm signal
             reg_id_end = 0x08 + 4*channel;
             
-            % TODO: Convert this to percentage
-            
+            % Read current pulse stard and end times
             start_val = self.readWord(reg_id_start);
             end_val = self.readWord(reg_id_end);
             
-            position = end_val - start_val;
+            % Calculate position as a 1-4096 register value
+            posn_val = double(end_val - start_val);
+            
+            % Convert the register value (1-4096) to a percentage of
+            % movement range.
+            % The inverse of the algorithm implemented in
+            % setServoPosition()
+            reg_val_duration = 1/self.frequency/4096;
+            min_ms = self.min_max_times(channel+1, 1);
+            max_ms = self.min_max_times(channel+1, 2);
+            time_range = (max_ms - min_ms) / 1000;
+            
+            % Get time the pulse is set to high, by multiplying the
+            % register value by the amount of ms corresponding to the value
+            pulse_length = posn_val*reg_val_duration;
+            
+            % Output final ratio of the pulse length to total range of
+            % possible pulse lengths
+            position = pulse_length / time_range - 1;
         end
 
     end

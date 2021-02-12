@@ -74,7 +74,7 @@ classdef QwiicI2CBase
             data_low_byte = readRegister(self.i2c_dev, registers(1));
             data_high_byte = readRegister(self.i2c_dev, registers(2));
             
-            data = data_low_byte + bitshift(data_high_byte, 8);
+            data = uint16(data_low_byte) + bitshift(uint16(data_high_byte), 8);
         end
         
     end
