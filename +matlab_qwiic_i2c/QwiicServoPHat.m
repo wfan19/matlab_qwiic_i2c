@@ -78,7 +78,6 @@ classdef QwiicServoPHat < matlab_qwiic_i2c.QwiicI2CBase
             pause(0.1)
 
             % Write frequency to register:
-            
             writeRegister(self.i2c_dev, 0xfe, prescale_val) 
 
             % Wake again
@@ -187,8 +186,11 @@ classdef QwiicServoPHat < matlab_qwiic_i2c.QwiicI2CBase
             pulse_length = posn_val*reg_val_duration;
             
             % Output final ratio of the pulse length to total range of
-            % possible pulse lengths
-            position = pulse_length / time_range - 1;
+            % possible pulse lengths:
+            % The -min_ms/1000 is to account for the offset, because the
+            % percentage value is counting from the start of the minimum
+            % pulse length
+            position = (pulse_length - min_ms/1000) / time_range;
         end
 
     end
